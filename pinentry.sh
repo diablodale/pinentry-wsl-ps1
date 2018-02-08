@@ -47,9 +47,6 @@ assuan_result() {
 }
 
 getpassword() {
-    echo "$PINERROR"
-    echo "$DESCRIPTION"
-    return
     local cmd_prompt=$(cat <<-DLM
         \$cred = \$Host.ui.PromptForCredential("$TITLE",
             "$PINERROR$DESCRIPTION",
@@ -81,16 +78,23 @@ DLM
         }
 DLM
     )
+    local cmd_store=$(cat <<-DLM
+        \$pw = \$Input | Select-Object -First 1
+        \$securepw = ConvertTo-SecureString \$pw -AsPlainText -Force
+        New-StoredCredential -Target "$CREDENTIALPREFIX$KEYINFO" -Type GENERIC -UserName "$KEYINFO" -SecurePassword \$securepw -Persist LocalMachine |
+        out-null
+DLM
+    )
+    PINERROR=""
     local credpassword
     local credpasswordrepeat
     local passwordfromcache=0
-    PINERROR=""
     if [ "$REPEATPASSWORD" -eq "0" ]; then
         if [ "$EXTPASSCACHE" -eq "1" ]; then
             if [ -n "$KEYINFO" ]; then
                 credpassword="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_lookup")"
                 if [ -n "$credpassword" ]; then
-                    echo -en "S PASSWORD_FROM_CACHE\nD $credpassword\nOK"
+                    echo -e "S PASSWORD_FROM_CACHE\nD $credpassword\nOK"
                     return
                 fi
             fi
@@ -101,22 +105,30 @@ DLM
         if [ "$REPEATPASSWORD" -eq "1" ]; then
             credpasswordrepeat="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_repeat")"
             if [ "$credpassword" == "$credpasswordrepeat" ]; then
-                echo -en "S PIN_REPEATED\nD $credpassword\nOK"
+                echo -e "S PIN_REPEATED\nD $credpassword\nOK"
             else
                 message "$REPEATERROR" > /dev/null
-                echo -n "$(assuan_result 114)" # unsure this is the correct error
+                echo "$(assuan_result 114)" # unsure this is the correct error
+                return
             fi
         else
-            echo -en "D $credpassword\nOK"
+            echo -e "D $credpassword\nOK"
+        fi
+        if [ "$EXTPASSCACHE" -eq "1" ]; then
+            if [ -n "$KEYINFO" ]; then
+                # avoid setting password on visible param
+                # alt is to always save on the single or last-of-repeat dialog. And if the repeat fails, then immediately delete it from the cred store
+                builtin echo -n "$credpassword" | powershell.exe -nologo -noprofile -noninteractive -command "$cmd_store"
+            fi
         fi
     else
-        echo -n "$(assuan_result 99)"
+        echo "$(assuan_result 99)"
     fi
 }
 
 removepassword() {
     if [ -z "$1" ]; then
-        echo -n "$(assuan_result 261)"
+        echo "$(assuan_result 261)"
         return
     fi
     local cmd_remove=$(cat <<-DLM
@@ -130,7 +142,7 @@ removepassword() {
         Write-Output "OK"
 DLM
     )
-    echo -n "$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_remove")"
+    echo "$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_remove")"
 }
 
 message() {
@@ -149,14 +161,15 @@ message() {
             \$defaultchoice)
 DLM
     )
-    powershell.exe -nologo -noprofile -noninteractive -command "$cmd" > /dev/null
-    echo -n "OK"
+    echo "$cmd"
+    local result="$(powershell.exe -nologo -noprofile -command "$cmd")" #> /dev/null
+    echo "OK"
 }
 
 confirm() {
     PINERROR=""
     if [ "$1" == "--one-button" ]; then
-        echo "$(message)"
+        message
         return
     fi
     local cmd=$(cat <<-DLM
@@ -180,33 +193,33 @@ confirm() {
 DLM
     )
     local result="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd")"
-    echo -n "$result"
+    echo "$result"
 }
 
 settimeout() {
     # https://stackoverflow.com/questions/21176487/adding-a-timeout-to-batch-powershell
     TIMEOUT="$1"
-    echo -n OK
+    echo "OK"
 }
 
 setdescription() {
     DESCRIPTION="$1"
-    echo -n OK
+    echo "OK"
 }
 
 setprompt() {
     PROMPT="$1"
-    echo -n OK
+    echo "OK"
 }
 
 settitle() {
     TITLE="$1"
-    echo -n OK
+    echo "OK"
 }
 
 setpinerror() {
     PINERROR="** $1 ** "
-    echo -n "$PINERROR"
+    echo "OK"
 }
 
 setkeyinfo() {
@@ -215,67 +228,67 @@ setkeyinfo() {
     else
         KEYINFO="$1"
     fi 
-    echo -n OK
+    echo "OK"
 }
 
 setrepeatpassword() {
     REPEATPASSWORD=1
     REPEATDESCRIPTION="$1"
-    echo -n OK
+    echo "OK"
 }
 
 setrepeaterror () {
     REPEATERROR="$1"
-    echo -n OK
+    echo "OK"
 }
 
 setokbutton() {
     OKBUTTON="${$1//_/&}"
-    echo -n OK
+    echo "OK"
 }
 
 setcancelbutton() {
     CANCELBUTTON="${$1//_/&}"
-    echo -n OK
+    echo "OK"
 }
 
 setnotokbutton() {
     NOTOKBUTTON="${$1//_/&}"
-    echo -n OK
+    echo "OK"
 }
 
 getinfo() {
     if [ "$1" == "version" ]; then
-        echo -en "D $VERSION\nOK"
+        echo -e "D $VERSION\nOK"
     elif [ "$1" == "pid" ]; then
-        echo -en "D $BASHPID\nOK"
+        echo -e "D $BASHPID\nOK"
     else
-        echo -n "$(assuan_result 275)"
+        echo "$(assuan_result 275)"
     fi
 }
 
 setoption() {
-    local key="$(echo "$1" | cut -d'=' -s -f1)"
-    local value="$(echo "$1" | cut -d'=' -s -f2)"
+    local key="$(echo "$1" | cut -d'=' -f1)"
+    local value="$(echo "$1" | cut -d'=' -s -f2-)"
     case $key in
         allow-external-password-cache)
             EXTPASSCACHE=1
-            echo -n "OK"
+            echo "OK"
             ;;
         default-ok)
-            echo -n $(setokbutton "$value")
+            setokbutton "$value"
             ;;
         default-cancel)
-            echo -n $(setcancelbutton "$value")
+            setcancelbutton "$value"
             ;;
         default-notok)
-            echo -n $(setnotokbutton "$value")
+            setnotokbutton "$value"
             ;;
         default-prompt)
-            echo -n $(setprompt "$value")
+            setprompt "$value"
             ;;
         *)
-            echo -n "OK"
+            echo "OK"
             ;;
     esac
 }
@@ -293,55 +306,55 @@ while IFS= read -r line; do
             exit 0
             ;;
         GETPIN)
-            echo "$(getpassword)"
+            getpassword
             ;;
         SETTIMEOUT)
-            echo "$(settimeout "$args")"
+            settimeout "$args"
             ;;
         SETDESC)
-            echo "$(setdescription "$args")"
+            setdescription "$args"
             ;;
         SETPROMPT)
-            echo "$(setprompt "$args")"
+            setprompt "$args"
             ;;
         SETTITLE)
-            echo "$(settitle "$args")"
+            settitle "$args"
             ;;
         SETKEYINFO)
-            echo "$(setkeyinfo "$args")"
+            setkeyinfo "$args"
             ;;
         SETOK)
-            echo "$(setokbutton "$args")"
+            setokbutton "$args"
             ;;
         SETCANCEL)
-            echo "$(setcancelbutton "$args")"
+            setcancelbutton "$args"
             ;;
         SETNOTOK)
-            echo "$(setnotokbutton "$args")"
+            setnotokbutton "$args"
             ;;
         CONFIRM)
-            echo "$(confirm "$args")"
+            confirm "$args"
             ;;
         MESSAGE)
-            echo "$(message)"
+            message "$args"
             ;;
         SETERROR)
-            echo "$(setpinerror "$args")"
+            setpinerror "$args"
             ;;
         GETINFO)
-            echo "$(getinfo "$args")"
+            getinfo "$args"
             ;;
         OPTION)
-            echo "$(setoption "$args")"
+            setoption "$args"
             ;;
         SETREPEAT)
-            echo "$(setrepeatpassword "$args")"
+            setrepeatpassword "$args"
             ;;
         SETREPEATERROR)
-            echo "$(setrepeaterror "$args")"
+            setrepeaterror "$args"
             ;;
         CLEARPASSPHRASE)
-            echo "$(removepassword "$args")"
+            removepassword "$args"
             ;;
         RESET)
             echo "OK"
