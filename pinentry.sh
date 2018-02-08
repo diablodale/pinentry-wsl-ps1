@@ -16,82 +16,6 @@ REPEATPASSWORD=0
 REPEATDESCRIPTION="Confirm password for GPG key"
 REPEATERROR="Error: Passwords did not match."
 
-#An alternative to the built-in PromptForChoice providing a consistent UI across different hosts
-# alternate #1 https://powershellone.wordpress.com/2015/09/10/a-nicer-promptforchoice-for-the-powershell-console-host/
-#     and https://gist.github.com/DBremen/73d7999094e7ac342ad6#file-get-choice-ps1
-# alternate #2 is https://social.technet.microsoft.com/Forums/scriptcenter/en-US/b2546f3c-0a79-4c5f-9044-9d9e962da79c/no-popup-window-when-i-run-the-ps-script-works-in-ise?forum=winserverpowershell
-
-FUNC_GETCHOICE=$(cat <<-'DLM'
-function Get-Choice {
-    [CmdletBinding()]
-    Param
-    (
-        [Parameter(Mandatory=$true,Position=0)]
-        $Title,
-
-        [Parameter(Mandatory=$true,Position=1)]
-        [String[]]
-        $Options,
-
-        [Parameter(Position=2)]
-        $DefaultChoice = -1
-    )
-    if ($DefaultChoice -ne -1 -and ($DefaultChoice -gt $Options.Count -or $DefaultChoice -lt 1)){
-        Write-Warning "DefaultChoice needs to be a value between 1 and $($Options.Count) or -1 (for none)"
-        exit
-    }
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-    [System.Windows.Forms.Application]::EnableVisualStyles()
-    $script:result = ""
-    $form = New-Object System.Windows.Forms.Form
-    $form.FormBorderStyle = [Windows.Forms.FormBorderStyle]::FixedDialog
-    $form.BackColor = [Drawing.Color]::White
-    $form.TopMost = $True
-    $form.Text = $Title
-    $form.ControlBox = $False
-    $form.StartPosition = [Windows.Forms.FormStartPosition]::CenterScreen
-    #calculate width required based on longest option text and form title
-    $minFormWidth = 100
-    $formHeight = 44
-    $minButtonWidth = 70
-    $buttonHeight = 23
-    $buttonY = 12
-    $spacing = 10
-    $buttonWidth = [Windows.Forms.TextRenderer]::MeasureText((($Options | sort Length)[-1]),$form.Font).Width + 1
-    $buttonWidth = [Math]::Max($minButtonWidth, $buttonWidth)
-    $formWidth =  [Windows.Forms.TextRenderer]::MeasureText($Title,$form.Font).Width
-    $spaceWidth = ($options.Count+1) * $spacing
-    $formWidth = ($formWidth, $minFormWidth, ($buttonWidth * $Options.Count + $spaceWidth) | Measure-Object -Maximum).Maximum
-    $form.ClientSize = New-Object System.Drawing.Size($formWidth,$formHeight)
-    $index = 0
-    #create the buttons dynamically based on the options
-    foreach ($option in $Options){
-        Set-Variable "button$index" -Value (New-Object System.Windows.Forms.Button)
-        $temp = Get-Variable "button$index" -ValueOnly
-        $temp.Size = New-Object System.Drawing.Size($buttonWidth,$buttonHeight)
-        $temp.UseVisualStyleBackColor = $True
-        $temp.Text = $option
-        $buttonX = ($index + 1) * $spacing + $index * $buttonWidth
-        $temp.Add_Click({ 
-            $script:result = $this.Text; $form.Close() 
-        })
-        $temp.Location = New-Object System.Drawing.Point($buttonX,$buttonY)
-        $form.Controls.Add($temp)
-        $index++
-    }
-    $shownString = '$this.Activate();'
-    if ($DefaultChoice -ne -1){
-        $shownString += '(Get-Variable "button$($DefaultChoice-1)" -ValueOnly).Focus()'
-    }
-    $shownSB = [ScriptBlock]::Create($shownString)
-    $form.Add_Shown($shownSB)
-    [void]$form.ShowDialog()
-    $result
-}
-DLM
-)
-
 assuan_result() {
     #echo -n $(( (5 << 24) | $1 ))
     case $1 in
@@ -127,9 +51,7 @@ getpassword() {
         \$cred = \$Host.ui.PromptForCredential("$TITLE",
             "$PINERROR$DESCRIPTION",
             "$KEYINFO",
-            "gpgkey://$KEYINFO",
-            "Generic",
-            "None,ReadOnlyUserName")
+            "")
         if (\$cred) {
             Write-Output \$cred.GetNetworkCredential().Password
         }
@@ -139,9 +61,7 @@ DLM
         \$cred = \$Host.ui.PromptForCredential("$TITLE",
             "$REPEATDESCRIPTION",
             "$KEYINFO",
-            "gpgkey://$KEYINFO",
-            "Generic",
-            "None,ReadOnlyUserName")
+            "")
         if (\$cred) {
             Write-Output \$cred.GetNetworkCredential().Password
         }
@@ -229,8 +149,10 @@ message() {
         desc="$DESCRIPTION"
     fi
     local cmd=$(cat <<-DLM
-        $FUNC_GETCHOICE
-        \$result = Get-Choice "$desc" (echo "$OKBUTTON") 1
+        \$wshShell = New-Object -ComObject WScript.Shell
+        \$options = 0x0 + 0x40 + 0x2000 + 0x10000 # 1 + 16 + 8192 + 65536
+        \$result = \$wshShell.Popup("$desc", $TIMEOUT, "$TITLE", \$options)
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject(\$wshShell) | Out-Null
 DLM
     )
     local result="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd")" #> /dev/null
@@ -244,14 +166,15 @@ confirm() {
         return
     fi
     local cmd=$(cat <<-DLM
-        $FUNC_GETCHOICE
-        \$result = Get-Choice "$DESCRIPTION" (echo "$OKBUTTON" "$CANCELBUTTON") 1
+        \$wshShell = New-Object -ComObject WScript.Shell
+        \$options = 0x1 + 0x30 + 0x2000 + 0x10000 # 1 + 16 + 8192 + 65536
+        \$result = \$wshShell.Popup("$DESCRIPTION", $TIMEOUT, "$TITLE", \$options)
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject(\$wshShell) | Out-Null
         if (\$result) {
-            switch(\$result)
-            {
-                "$OKBUTTON" { Write-Output "OK"}
-                "$CANCELBUTTON" { Write-Output "$(assuan_result 99)"}
-                # "otherbutton" { Write-Output "$(assuan_result 114)"}
+            switch(\$result) {
+                1 { Write-Output "OK" }
+                2 { Write-Output "$(assuan_result 99)" }
+                default { Write-Output "$(assuan_result 114)" }
             }
         }
         else {
