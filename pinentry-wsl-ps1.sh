@@ -1,11 +1,11 @@
-#/bin/bash
+#!/bin/bash
 
 VERSION="0.1.0"
 TIMEOUT="0"
 DESCRIPTION="Enter password for GPG key"
 PROMPT="Password:"
 TITLE="GPG Key Credentials"
-CREDENTIALPREFIX="gpgkey://"
+CACHEPREFIX="gpgcache://"
 KEYINFO=""
 OKBUTTON="&OK"
 CANCELBUTTON="&Cancel"
@@ -51,7 +51,9 @@ getpassword() {
         \$cred = \$Host.ui.PromptForCredential("$TITLE",
             "$PINERROR$DESCRIPTION",
             "$KEYINFO",
-            "")
+            "",
+            "Generic",
+            "None,ReadOnlyUserName")
         if (\$cred) {
             Write-Output \$cred.GetNetworkCredential().Password
         }
@@ -61,14 +63,16 @@ DLM
         \$cred = \$Host.ui.PromptForCredential("$TITLE",
             "$REPEATDESCRIPTION",
             "$KEYINFO",
-            "")
+            "",
+            "Generic",
+            "None,ReadOnlyUserName")
         if (\$cred) {
             Write-Output \$cred.GetNetworkCredential().Password
         }
 DLM
     )
     local cmd_lookup=$(cat <<-DLM
-        \$cred = Get-StoredCredential -Target "$CREDENTIALPREFIX$KEYINFO" -Type GENERIC
+        \$cred = Get-StoredCredential -Target "$CACHEPREFIX$KEYINFO" -Type GENERIC
         if (\$cred) {
             Write-Output \$cred.GetNetworkCredential().Password
         }
@@ -77,25 +81,27 @@ DLM
     local cmd_store=$(cat <<-DLM
         \$pw = \$Input | Select-Object -First 1
         \$securepw = ConvertTo-SecureString \$pw -AsPlainText -Force
-        New-StoredCredential -Target "$CREDENTIALPREFIX$KEYINFO" -Type GENERIC -UserName "$KEYINFO" -SecurePassword \$securepw -Persist LocalMachine |
+        New-StoredCredential -Target "$CACHEPREFIX$KEYINFO" -Type GENERIC -UserName "$KEYINFO" -SecurePassword \$securepw -Persist LocalMachine |
         out-null
 DLM
     )
-    PINERROR=""
     local credpassword
     local credpasswordrepeat
     local passwordfromcache=0
-    if [ "$REPEATPASSWORD" -eq "0" ]; then
-        if [ "$EXTPASSCACHE" -eq "1" ]; then
-            if [ -n "$KEYINFO" ]; then
-                credpassword="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_lookup")"
-                if [ -n "$credpassword" ]; then
-                    echo -e "S PASSWORD_FROM_CACHE\nD $credpassword\nOK"
-                    return
+    if [ -z "$PINERROR" ]; then
+        if [ "$REPEATPASSWORD" -eq "0" ]; then
+            if [ "$EXTPASSCACHE" -eq "1" ]; then
+                if [ -n "$KEYINFO" ]; then
+                    credpassword="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_lookup")"
+                    if [ -n "$credpassword" ]; then
+                        echo -e "S PASSWORD_FROM_CACHE\nD $credpassword\nOK"
+                        return
+                    fi
                 fi
             fi
         fi
     fi
+    PINERROR=""
     credpassword="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_prompt")"
     if [ -n "$credpassword" ]; then
         if [ "$REPEATPASSWORD" -eq "1" ]; then
@@ -129,7 +135,7 @@ removepassword() {
     fi
     local cmd_remove=$(cat <<-DLM
         try {
-            Remove-StoredCredential -Target "$CREDENTIALPREFIX$1" -Type GENERIC -ErrorAction Stop
+            Remove-StoredCredential -Target "$CACHEPREFIX$1" -Type GENERIC -ErrorAction Stop
         }
         catch {
             Write-Output "$(assuan_result 261)"
@@ -193,7 +199,10 @@ settimeout() {
 }
 
 setdescription() {
-    DESCRIPTION="$1"
+    local prep1="${1//%0A/%0D%0A}"       # convert LF into Windows CRLF
+    local prep2="${prep1//%/\\x}"        # convert hex encoding style
+    local decode="$(echo -en "$prep2")"  # decode hex
+    DESCRIPTION="${decode//\"/\`\"}"     # escape double quotes for powershell
     echo "OK"
 }
 
@@ -208,7 +217,11 @@ settitle() {
 }
 
 setpinerror() {
-    PINERROR="** $1 ** "
+    local prep1="** $1 **"
+    local prep2="${prep1//%0A/%0D%0A}"      # convert LF into Windows CRLF
+    local prep3="${prep2//%/\\x}"           # convert hex encoding style
+    local decode="$(echo -e "$prep3")"      # decode hex
+    PINERROR="${decode//\"/\`\"}"$'\r'$'\n' # escape double quotes for powershell; add CRLF to separate line
     echo "OK"
 }
 
@@ -233,17 +246,17 @@ setrepeaterror () {
 }
 
 setokbutton() {
-    OKBUTTON="${$1//_/&}"
+    OKBUTTON="${1//_/&}"
     echo "OK"
 }
 
 setcancelbutton() {
-    CANCELBUTTON="${$1//_/&}"
+    CANCELBUTTON="${1//_/&}"
     echo "OK"
 }
 
 setnotokbutton() {
-    NOTOKBUTTON="${$1//_/&}"
+    NOTOKBUTTON="${1//_/&}"
     echo "OK"
 }
 
@@ -283,13 +296,12 @@ setoption() {
     esac
 }
 
+#rm -f /home/dalep/tracepin.txt
 echo "OK Your orders please"
 while IFS= read -r line; do
     #echo "$line" >> /home/dalep/tracepin.txt
     action="$(echo $line | cut -d' ' -f1)"
     args="$(echo $line | cut -d' ' -s -f2-)"
-    #echo "action:$action:"
-    #echo "args:$args:"
     case $action in
         BYE)
             echo "OK closing connection"
