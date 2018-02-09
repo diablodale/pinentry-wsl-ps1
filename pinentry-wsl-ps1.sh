@@ -5,7 +5,8 @@ TIMEOUT="0"
 DESCRIPTION="Enter password for GPG key"
 PROMPT="Password:"
 TITLE="GPG Key Credentials"
-CACHEPREFIX="gpgcache://"
+CACHEPREFIX="gpgcache:"
+CACHEUSER=""
 KEYINFO=""
 OKBUTTON="&OK"
 CANCELBUTTON="&Cancel"
@@ -47,10 +48,15 @@ assuan_result() {
 }
 
 getpassword() {
+    if [ -n $CACHEUSER ]; then
+        local creduser="$CACHEUSER"
+    else
+        local creduser="$KEYINFO"
+    fi
     local cmd_prompt=$(cat <<-DLM
         \$cred = \$Host.ui.PromptForCredential("$TITLE",
             "$PINERROR$DESCRIPTION",
-            "$KEYINFO",
+            "$creduser",
             "",
             "Generic",
             "None,ReadOnlyUserName")
@@ -62,7 +68,7 @@ DLM
     local cmd_repeat=$(cat <<-DLM
         \$cred = \$Host.ui.PromptForCredential("$TITLE",
             "$REPEATDESCRIPTION",
-            "$KEYINFO",
+            "$creduser",
             "",
             "Generic",
             "None,ReadOnlyUserName")
@@ -81,7 +87,7 @@ DLM
     local cmd_store=$(cat <<-DLM
         \$pw = \$Input | Select-Object -First 1
         \$securepw = ConvertTo-SecureString \$pw -AsPlainText -Force
-        New-StoredCredential -Target "$CACHEPREFIX$KEYINFO" -Type GENERIC -UserName "$KEYINFO" -SecurePassword \$securepw -Persist LocalMachine |
+        New-StoredCredential -Target "$CACHEPREFIX$KEYINFO" -Type GENERIC -UserName "$creduser" -SecurePassword \$securepw -Persist LocalMachine |
         out-null
 DLM
     )
@@ -203,6 +209,10 @@ setdescription() {
     local prep2="${prep1//%/\\x}"        # convert hex encoding style
     local decode="$(echo -en "$prep2")"  # decode hex
     DESCRIPTION="${decode//\"/\`\"}"     # escape double quotes for powershell
+    local searchfor='ID ([[:xdigit:]]{16})'  # hack to search for first gpg key id in description
+    if [[ "$1" =~ $searchfor ]]; then
+        CACHEUSER="${BASH_REMATCH[1]}"
+    fi
     echo "OK"
 }
 
