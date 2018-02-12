@@ -8,12 +8,13 @@ TITLE="GPG Key Credentials"
 CACHEPREFIX="gpgcache:"
 CACHEUSER=""
 KEYINFO=""
+PERSISTANCE="Enterprise" # Session, LocalMachine, or Enterprise
 OKBUTTON="&OK"
 CANCELBUTTON="&Cancel"
 NOTOKBUTTON="&Do not do this"
 PINERROR=""
-EXTPASSCACHE=0
-REPEATPASSWORD=0
+EXTPASSCACHE="0"
+REPEATPASSWORD="0"
 REPEATDESCRIPTION="Confirm password for GPG key"
 REPEATERROR="Error: Passwords did not match."
 
@@ -87,7 +88,7 @@ DLM
     local cmd_store=$(cat <<-DLM
         \$pw = \$Input | Select-Object -First 1
         \$securepw = ConvertTo-SecureString \$pw -AsPlainText -Force
-        New-StoredCredential -Target "$CACHEPREFIX$KEYINFO" -Type GENERIC -UserName "$creduser" -SecurePassword \$securepw -Persist LocalMachine |
+        New-StoredCredential -Target "$CACHEPREFIX$KEYINFO" -Type GENERIC -UserName "$creduser" -SecurePassword \$securepw -Persist $PERSISTANCE |
         out-null
 DLM
     )
@@ -95,8 +96,8 @@ DLM
     local credpasswordrepeat
     local passwordfromcache=0
     if [ -z "$PINERROR" ]; then
-        if [ "$REPEATPASSWORD" -eq "0" ]; then
-            if [ "$EXTPASSCACHE" -eq "1" ]; then
+        if [ "$REPEATPASSWORD" == "0" ]; then
+            if [ "$EXTPASSCACHE" == "1" ]; then
                 if [ -n "$KEYINFO" ]; then
                     credpassword="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_lookup")"
                     if [ -n "$credpassword" ]; then
@@ -110,7 +111,7 @@ DLM
     PINERROR=""
     credpassword="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_prompt")"
     if [ -n "$credpassword" ]; then
-        if [ "$REPEATPASSWORD" -eq "1" ]; then
+        if [ "$REPEATPASSWORD" == "1" ]; then
             credpasswordrepeat="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_repeat")"
             if [ "$credpassword" == "$credpasswordrepeat" ]; then
                 echo -e "S PIN_REPEATED\nD $credpassword\nOK"
@@ -122,7 +123,7 @@ DLM
         else
             echo -e "D $credpassword\nOK"
         fi
-        if [ "$EXTPASSCACHE" -eq "1" ]; then
+        if [ "$EXTPASSCACHE" == "1" ]; then
             if [ -n "$KEYINFO" ]; then
                 # avoid setting password on visible param
                 # alt is to always save on the single or last-of-repeat dialog. And if the repeat fails, then immediately delete it from the cred store
@@ -204,16 +205,27 @@ settimeout() {
     echo "OK"
 }
 
+decodegpgagentstr() {
+    local decode="${1//%0A/%0D%0A}"  # convert hex LF into hex Windows CRLF
+    decode="${decode//%/\\x}"        # convert hex encoding style
+    decode="$(echo -en "$decode")"   # decode hex
+    echo -n "${decode//\"/\`\"}"     # escape double quotes for powershell
+}
+
 setdescription() {
-    local prep1="${1//%0A/%0D%0A}"       # convert LF into Windows CRLF
-    local prep2="${prep1//%/\\x}"        # convert hex encoding style
-    local decode="$(echo -en "$prep2")"  # decode hex
-    DESCRIPTION="${decode//\"/\`\"}"     # escape double quotes for powershell
+    DESCRIPTION="$(decodegpgagentstr "$1")"
     local searchfor='ID ([[:xdigit:]]{16})'  # hack to search for first gpg key id in description
     if [[ "$1" =~ $searchfor ]]; then
         CACHEUSER="${BASH_REMATCH[1]}"
+        echo "OK"
+        return
     fi
-    echo "OK"
+    local searchfor='(([[:xdigit:]][[:xdigit:]]:){15}[[:xdigit:]][[:xdigit:]])'  # hack to search for ssh fingerprint in description
+    if [[ "$1" =~ $searchfor ]]; then
+        CACHEUSER="${BASH_REMATCH[1]}"
+        echo "OK"
+        return
+    fi
 }
 
 setprompt() {
@@ -227,11 +239,7 @@ settitle() {
 }
 
 setpinerror() {
-    local prep1="** $1 **"
-    local prep2="${prep1//%0A/%0D%0A}"      # convert LF into Windows CRLF
-    local prep3="${prep2//%/\\x}"           # convert hex encoding style
-    local decode="$(echo -e "$prep3")"      # decode hex
-    PINERROR="${decode//\"/\`\"}"$'\r'$'\n' # escape double quotes for powershell; add CRLF to separate line
+    PINERROR="$(decodegpgagentstr "** $1 **")"$'\r'$'\n' # decode and add CRLF to separate line
     echo "OK"
 }
 
@@ -245,13 +253,13 @@ setkeyinfo() {
 }
 
 setrepeatpassword() {
-    REPEATPASSWORD=1
-    REPEATDESCRIPTION="$1"
+    REPEATPASSWORD="1"
+    REPEATDESCRIPTION="$(decodegpgagentstr "$1")"
     echo "OK"
 }
 
 setrepeaterror () {
-    REPEATERROR="$1"
+    REPEATERROR="$(decodegpgagentstr "$1")"
     echo "OK"
 }
 
