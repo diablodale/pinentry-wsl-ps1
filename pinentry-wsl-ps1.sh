@@ -1,5 +1,32 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
+# pinentry-wsl-ps1
+#
+# (c) 2018 Dale Phurrough
+# Licensed under the Mozilla Public License 2.0
+#
+# Allows GnuPG to prompt and read passphrases by the pinentry standard
+# with a GUI when running within WSL (Windows Subsystem for Linux).
+# Works for all keys managed by gpg-agent (GPG, SSH, etc).
+# This is a drop-in GUI alternative to pinentry-curses, pinentry-gtk-2, etc.
+# https://www.gnupg.org/software/pinentry/index.html
+#
+# Setup:
+# 1. Save this script and set its permissions to be executable
+# 2. Configure gpg-agent to use this script for pinentry using
+#    one of the following methods:
+#    a) Set pinentry-program within ~/.gnupg/gpg-agent.conf
+#       pinentry-program /mnt/c/repos/pinentry-wsl-ps1/pinentry-wsl-ps1.sh
+#    b) Set the path to this script when you launch gpg-agent
+#       gpg-agent --pinentry-program /mnt/c/repos/pinentry-wsl-ps1/pinentry-wsl-ps1.sh
+# 3. Optionally enable persistence of passwords.
+#    Requires https://github.com/davotronic5000/PowerShell_Credential_Manager
+#    Please follow instructions there to install from the Gallery or GitHub.
+#    Note security perspectives like https://security.stackexchange.com/questions/119765/how-secure-is-the-windows-credential-manager
+#    Possible values for PERSISTENCE are: "", "Session", "LocalMachine", or "Enterprise"
+PERSISTENCE=""
+
+# Do not casually edit the below values
 VERSION="0.1.0"
 TIMEOUT="0"
 DESCRIPTION="Enter password for GPG key"
@@ -8,7 +35,6 @@ TITLE="GPG Key Credentials"
 CACHEPREFIX="gpgcache:"
 CACHEUSER=""
 KEYINFO=""
-PERSISTANCE="Enterprise" # Session, LocalMachine, or Enterprise
 OKBUTTON="&OK"
 CANCELBUTTON="&Cancel"
 NOTOKBUTTON="&Do not do this"
@@ -18,8 +44,8 @@ REPEATPASSWORD="0"
 REPEATDESCRIPTION="Confirm password for GPG key"
 REPEATERROR="Error: Passwords did not match."
 
+# convert Assuan protocol error into an ERR number, e.g. echo -n $(( (5 << 24) | $1 ))
 assuan_result() {
-    #echo -n $(( (5 << 24) | $1 ))
     case $1 in
         0)
             echo -n "ERR 0 no error"
@@ -48,6 +74,7 @@ assuan_result() {
     esac
 }
 
+# GUI dialogs for passwords; text is dynamically set by gpg-agent via protocol
 getpassword() {
     if [ -n $CACHEUSER ]; then
         local creduser="$CACHEUSER"
@@ -88,7 +115,7 @@ DLM
     local cmd_store=$(cat <<-DLM
         \$pw = \$Input | Select-Object -First 1
         \$securepw = ConvertTo-SecureString \$pw -AsPlainText -Force
-        New-StoredCredential -Target "$CACHEPREFIX$KEYINFO" -Type GENERIC -UserName "$creduser" -SecurePassword \$securepw -Persist $PERSISTANCE |
+        New-StoredCredential -Target "$CACHEPREFIX$KEYINFO" -Type GENERIC -UserName "$creduser" -SecurePassword \$securepw -Persist $PERSISTENCE |
         out-null
 DLM
     )
@@ -135,6 +162,7 @@ DLM
     fi
 }
 
+# remove password from persistent store
 removepassword() {
     if [ -z "$1" ]; then
         echo "$(assuan_result 261)"
@@ -151,9 +179,14 @@ removepassword() {
         Write-Output "OK"
 DLM
     )
-    echo "$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_remove")"
+    if [ "$EXTPASSCACHE" == "1" ]; then
+        echo "$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_remove")"
+    else
+        echo "OK"
+    fi
 }
 
+# GUI dialog box with simple message and one OK button
 message() {
     local desc
     if [ -n "$1" ]; then
@@ -172,6 +205,7 @@ DLM
     echo "OK"
 }
 
+# GUI dialog box with test and two buttons: OK, Cancel
 confirm() {
     PINERROR=""
     if [ "$1" == "--one-button" ]; then
@@ -199,12 +233,15 @@ DLM
     echo "$result"
 }
 
+# set a timeout value in seconds after which prompts/dialogs are automatically cancelled
+# limited functionality in current codebase
+# potential improvements at https://stackoverflow.com/questions/21176487/adding-a-timeout-to-batch-powershell
 settimeout() {
-    # https://stackoverflow.com/questions/21176487/adding-a-timeout-to-batch-powershell
     TIMEOUT="$1"
     echo "OK"
 }
 
+# helper function for decoding strings from gpg-agent into Windows-compatible format
 decodegpgagentstr() {
     local decode="${1//%0A/%0D%0A}"  # convert hex LF into hex Windows CRLF
     decode="${decode//%/\\x}"        # convert hex encoding style
@@ -212,6 +249,8 @@ decodegpgagentstr() {
     echo -n "${decode//\"/\`\"}"     # escape double quotes for powershell
 }
 
+# commonly used to set main text in GUI dialog boxes
+# also parses for key ids to display in GUI prompts 
 setdescription() {
     DESCRIPTION="$(decodegpgagentstr "$1")"
     local searchfor='ID ([[:xdigit:]]{16})'  # hack to search for first gpg key id in description
@@ -288,12 +327,15 @@ getinfo() {
     fi
 }
 
+# often called by gpg-agent to set default values
 setoption() {
     local key="$(echo "$1" | cut -d'=' -f1)"
     local value="$(echo "$1" | cut -d'=' -s -f2-)"
     case $key in
         allow-external-password-cache)
-            EXTPASSCACHE=1
+            if [ -n "$PERSISTENCE" ]; then
+                EXTPASSCACHE=1
+            fi
             echo "OK"
             ;;
         default-ok)
@@ -314,10 +356,15 @@ setoption() {
     esac
 }
 
-#rm -f /home/dalep/tracepin.txt
+# check that we are running within WSL
+if ! cat /proc/sys/kernel/osrelease | grep -q -i Microsoft; then
+    echo "$(assuan_result 257)"
+    exit 1
+fi
+
+# main loop to read stdin and respond
 echo "OK Your orders please"
 while IFS= read -r line; do
-    #echo "$line" >> /home/dalep/tracepin.txt
     action="$(echo $line | cut -d' ' -f1)"
     args="$(echo $line | cut -d' ' -s -f2-)"
     case $action in
