@@ -9,10 +9,10 @@ Licensed under the Mozilla Public License 2.0
 ## Features
 
 * Allows GnuPG to prompt and read passphrases by the pinentry protocol
-with a GUI when running within WSL (Windows Subsystem for Linux)
+  with a GUI when running within WSL (Windows Subsystem for Linux)
 * Works for all keys managed by gpg-agent (GPG, SSH, etc)
 * Drop-in replacement GUI to pinentry-curses, pinentry-gtk-2, etc.
-
+* Works well with [WSLgit](https://github.com/andy-5/wslgit). Enables your Git and GPG configuration/processing in WSL while access/using it from Windows apps like VS Code. Easy-breezy GPG signing of Git commits. 🙂📝
 
 ## Requirements
 
@@ -22,7 +22,8 @@ with a GUI when running within WSL (Windows Subsystem for Linux)
 
 ## Setup
 
-1. Save the `pinentry-wsl-ps1.sh` script and set its permissions to be executable
+1. Save the `pinentry-wsl-ps1.sh` script and set its permissions to be readable and executable, e.g.  
+   `chmod ug=rx pinentry-wsl-ps1.sh`
 2. Configure gpg-agent to use this script for pinentry using
    one of the following methods  
     1. Set pinentry-program within ~/.gnupg/gpg-agent.conf to the script's path, e.g.  
@@ -110,8 +111,8 @@ pinentry-program /mnt/c/repos/pinentry-wsl-ps1/pinentry-wsl-ps1.sh
 
 ## References
 
-* https://www.gnupg.org/software/pinentry/index.html
-* https://www.gnupg.org/documentation/manuals/gnupg/Agent-Options.html
-* https://github.com/GPGTools/pinentry/blob/master/doc/pinentry.texi
-* https://gist.github.com/mdeguzis/05d1f284f931223624834788da045c65
-* https://github.com/GPGTools/pinentry/blob/master/pinentry/pinentry.c
+* <https://www.gnupg.org/software/pinentry/index.html>
+* <https://www.gnupg.org/documentation/manuals/gnupg/Agent-Options.html>
+* <https://github.com/GPGTools/pinentry/blob/master/doc/pinentry.texi>
+* <https://gist.github.com/mdeguzis/05d1f284f931223624834788da045c65>
+* <https://github.com/GPGTools/pinentry/blob/master/pinentry/pinentry.c>
