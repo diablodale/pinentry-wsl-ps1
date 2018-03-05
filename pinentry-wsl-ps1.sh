@@ -25,9 +25,11 @@
 #    Note security perspectives like https://security.stackexchange.com/questions/119765/how-secure-is-the-windows-credential-manager
 #    Possible values for PERSISTENCE are: "", "Session", "LocalMachine", or "Enterprise"
 PERSISTENCE=""
+NOTIFY="1"
+DEBUGLOG=""
 
 # Do not casually edit the below values
-VERSION="0.1.0"
+VERSION="0.2.0"
 TIMEOUT="0"
 DESCRIPTION="Enter password for GPG key"
 PROMPT="Password:"
@@ -43,6 +45,7 @@ EXTPASSCACHE="0"
 REPEATPASSWORD="0"
 REPEATDESCRIPTION="Confirm password for GPG key"
 REPEATERROR="Error: Passwords did not match."
+GRABKEYBOARD="0"
 
 # convert Assuan protocol error into an ERR number, e.g. echo -n $(( (5 << 24) | $1 ))
 assuan_result() {
@@ -119,6 +122,18 @@ DLM
         out-null
 DLM
     )
+    # idea from http://thewindowscollege.com/display-toast-notifications-windows-10.html
+    # alt1: https://gist.github.com/loge5/7ec41e2e2f0e0293fdcc5155499e9072
+    # alt2: https://gist.github.com/Windos/9aa6a684ac583e0d38a8fa68196bc2dc
+    local cmd_toast=$(cat <<-DLM
+        [reflection.assembly]::loadwithpartialname("System.Windows.Forms")
+        [reflection.assembly]::loadwithpartialname("System.Drawing")
+        \$notify = new-object system.windows.forms.notifyicon
+        \$notify.icon = [System.Drawing.SystemIcons]::Information
+        \$notify.visible = \$true
+        \$notify.showballoontip(10, "GPG pinentry-wsl-ps1", "GPG password retrieved from Windows Credential Manager", [system.windows.forms.tooltipicon]::Info)
+DLM
+    )
     local credpassword
     local credpasswordrepeat
     local passwordfromcache=0
@@ -129,6 +144,9 @@ DLM
                     credpassword="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_lookup")"
                     if [ -n "$credpassword" ]; then
                         echo -e "S PASSWORD_FROM_CACHE\nD $credpassword\nOK"
+                        if [ "$NOTIFY" == "1" ]; then
+                            powershell.exe -nologo -noprofile -noninteractive -command "$cmd_toast" > /dev/null
+                        fi
                         return
                     fi
                 fi
@@ -350,6 +368,14 @@ setoption() {
         default-prompt)
             setprompt "$value"
             ;;
+        grab)
+            GRABKEYBOARD="1"
+            echo "OK"
+            ;;
+        no-grab)
+            GRABKEYBOARD="0"
+            echo "OK"
+            ;;
         *)
             echo "OK"
             ;;
@@ -365,6 +391,9 @@ fi
 # main loop to read stdin and respond
 echo "OK Your orders please"
 while IFS= read -r line; do
+    if [ -n "$DEBUGLOG" ]; then
+        echo "$line" >> "$DEBUGLOG"
+    fi
     action="$(echo $line | cut -d' ' -f1)"
     args="$(echo $line | cut -d' ' -s -f2-)"
     case $action in
