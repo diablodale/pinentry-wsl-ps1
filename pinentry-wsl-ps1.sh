@@ -24,6 +24,13 @@
 #    Please follow instructions there to install from the Gallery or GitHub.
 #    Note security perspectives like https://security.stackexchange.com/questions/119765/how-secure-is-the-windows-credential-manager
 #    Possible values for PERSISTENCE are: "", "Session", "LocalMachine", or "Enterprise"
+# 4. Optionally disable toast notification of password retrieval from Credential Manager.
+#    By default, this code notifies you with a toast notification every time gpg-agent
+#    retrieves a password from the Windows Credential Manager. Gpg-agent caches passwords
+#    by default (see gpg-agent settings like max-cache-ttl) so you may not see the notification
+#    with every usage.
+#    * Disable: edit the script, near the top, set NOTIFY to the value "0"
+#    * Enable: edit the script, near the top, set NOTIFY to the value "1"
 PERSISTENCE=""
 NOTIFY="1"
 DEBUGLOG=""

@@ -39,8 +39,8 @@ with a GUI when running within WSL (Windows Subsystem for Linux)
         * `"LocalMachine"` persists the password for the current Windows login on the local Windows computer
         * `"Enterprise"` persists the password for the current Windows login and requests Windows Credential Manager to synchronize it across Windows computers for that same Windows login
 4. Optionally _disable_ toast notification of password retrieval from Credential Manager. By default, this code notifies you with a toast notification every time gpg-agent retrieves a password from the Windows Credential Manager. Gpg-agent caches passwords by default (see gpg-agent settings like [`max-cache-ttl`](https://gnupg.org/documentation/manuals/gnupg/Agent-Options.html#Agent-Options)) so you may not see the notification with every usage.
-    * Disable: edit the script, near the top, set `TOAST` to the value `"0"`
-    * Enable: edit the script, near the top, set `TOAST` to the value `"1"`
+    * Disable: edit the script, near the top, set `NOTIFY` to the value `"0"`
+    * Enable: edit the script, near the top, set `NOTIFY` to the value `"1"`
 
 
 ## Troubleshooting Ideas
