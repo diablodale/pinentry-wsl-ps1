@@ -36,7 +36,7 @@ NOTIFY="1"
 DEBUGLOG=""
 
 # Do not casually edit the below values
-VERSION="0.2.0"
+VERSION="0.2.1"
 TIMEOUT="0"
 DESCRIPTION="Enter password for GPG key"
 PROMPT="Password:"
@@ -86,10 +86,14 @@ assuan_result() {
 
 # GUI dialogs for passwords; text is dynamically set by gpg-agent via protocol
 getpassword() {
-    if [ -n $CACHEUSER ]; then
+    if [ -n "$CACHEUSER" ]; then
         local creduser="$CACHEUSER"
     else
-        local creduser="$KEYINFO"
+        if [ -n "$KEYINFO" ]; then
+            local creduser="$KEYINFO"
+        else
+            local creduser="--not yet defined--"
+        fi
     fi
     local cmd_prompt=$(cat <<-DLM
         \$cred = \$Host.ui.PromptForCredential("$TITLE",
@@ -275,7 +279,7 @@ decodegpgagentstr() {
 }
 
 # commonly used to set main text in GUI dialog boxes
-# also parses for key ids to display in GUI prompts 
+# also parses for key ids to display in GUI prompts
 setdescription() {
     DESCRIPTION="$(decodegpgagentstr "$1")"
     local searchfor='ID ([[:xdigit:]]{16})'  # hack to search for first gpg key id in description
@@ -290,6 +294,7 @@ setdescription() {
         echo "OK"
         return
     fi
+    echo "OK"
 }
 
 setprompt() {
@@ -312,7 +317,7 @@ setkeyinfo() {
         KEYINFO=""
     else
         KEYINFO="$1"
-    fi 
+    fi
     echo "OK"
 }
 
