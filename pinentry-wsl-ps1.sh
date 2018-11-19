@@ -285,14 +285,10 @@ setdescription() {
     local searchfor='ID ([[:xdigit:]]{16})'  # hack to search for first gpg key id in description
     if [[ "$1" =~ $searchfor ]]; then
         CACHEUSER="${BASH_REMATCH[1]}"
-        echo "OK"
-        return
     fi
     local searchfor='(([[:xdigit:]][[:xdigit:]]:){15}[[:xdigit:]][[:xdigit:]])'  # hack to search for ssh fingerprint in description
     if [[ "$1" =~ $searchfor ]]; then
         CACHEUSER="${BASH_REMATCH[1]}"
-        echo "OK"
-        return
     fi
     echo "OK"
 }
