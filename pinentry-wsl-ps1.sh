@@ -31,9 +31,9 @@
 #    with every usage.
 #    * Disable: edit the script, near the top, set NOTIFY to the value "0"
 #    * Enable: edit the script, near the top, set NOTIFY to the value "1"
-PERSISTENCE=""
-NOTIFY="1"
-DEBUGLOG=""
+PERSISTENCE=${PERSISTENCE-""}
+NOTIFY=${NOTIFY-"1"}
+DEBUGLOG=${DEBUGLOG-""}
 
 # Do not casually edit the below values
 VERSION="0.2.1"
