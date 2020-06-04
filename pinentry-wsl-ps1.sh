@@ -154,7 +154,7 @@ DLM
                 if [ -n "$KEYINFO" ]; then
                     credpassword="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_lookup")"
                     if [ -n "$credpassword" ]; then
-                        echo -e "S PASSWORD_FROM_CACHE\nD $credpassword\nOK"
+                        printf "S PASSWORD_FROM_CACHE\nD %s\nOK\n" "$credpassword"
                         if [ "$NOTIFY" == "1" ]; then
                             powershell.exe -nologo -noprofile -noninteractive -command "$cmd_toast" > /dev/null
                         fi
@@ -170,20 +170,20 @@ DLM
         if [ "$REPEATPASSWORD" == "1" ]; then
             credpasswordrepeat="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_repeat")"
             if [ "$credpassword" == "$credpasswordrepeat" ]; then
-                echo -e "S PIN_REPEATED\nD $credpassword\nOK"
+                printf "S PIN_REPEATED\nD %s\nOK\n" "$credpassword"
             else
                 message "$REPEATERROR" > /dev/null
                 echo "$(assuan_result 114)" # unsure this is the correct error
                 return
             fi
         else
-            echo -e "D $credpassword\nOK"
+	    printf "D %s\nOK\n" "$credpassword"
         fi
         if [ "$EXTPASSCACHE" == "1" ]; then
             if [ -n "$KEYINFO" ]; then
                 # avoid setting password on visible param
                 # alt is to always save on the single or last-of-repeat dialog. And if the repeat fails, then immediately delete it from the cred store
-                builtin echo -n "$credpassword" | powershell.exe -nologo -noprofile -noninteractive -command "$cmd_store"
+                builtin echo -n -E "$credpassword" | powershell.exe -nologo -noprofile -noninteractive -command "$cmd_store"
             fi
         fi
     else
