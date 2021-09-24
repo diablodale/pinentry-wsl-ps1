@@ -30,6 +30,8 @@ Licensed under the Mozilla Public License 2.0
      `pinentry-program /mnt/c/repos/pinentry-wsl-ps1/pinentry-wsl-ps1.sh`
     2. Or, set the path to this script when you launch gpg-agent, e.g.  
      `gpg-agent --pinentry-program /mnt/c/repos/pinentry-wsl-ps1/pinentry-wsl-ps1.sh`
+    3. Or, set `$PINENTRY_BINARY` to the path of this script in `~/.profile` (see below) on supporting
+       distributions such as [Opensuse](https://obs.smar.fi/package/view_file/SUSE:SLE-15:Update/pinentry/pinentry?expand=0)
 3. Optionally _enable_ persistence of passwords.  
     1. Follow instructions <https://github.com/davotronic5000/PowerShell_Credential_Manager>
    to install the needed module from the Powershell Gallery or GitHub.
