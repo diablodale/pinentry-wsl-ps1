@@ -15,9 +15,12 @@
 # 1. Save this script and set its permissions to be executable
 # 2. Configure gpg-agent to use this script for pinentry using
 #    one of the following methods:
-#    a) Set pinentry-program within ~/.gnupg/gpg-agent.conf
+#    a) Use `update-alternatives` to change the symlink in `/usr/bin/pinentry`
+#       sudo update-alternatives --install /usr/bin/pinentry pinentry /mnt/c/repos/pinentry-wsl-ps1/pinentry-wsl-ps1.sh 10
+#       sudo update-alternatives --set pinentry /mnt/c/repos/pinentry-wsl-ps1/pinentry-wsl-ps1.sh
+#    b) Set pinentry-program within ~/.gnupg/gpg-agent.conf
 #       pinentry-program /mnt/c/repos/pinentry-wsl-ps1/pinentry-wsl-ps1.sh
-#    b) Set the path to this script when you launch gpg-agent
+#    c) Set the path to this script when you launch gpg-agent
 #       gpg-agent --pinentry-program /mnt/c/repos/pinentry-wsl-ps1/pinentry-wsl-ps1.sh
 # 3. Optionally enable persistence of passwords.
 #    Requires https://github.com/davotronic5000/PowerShell_Credential_Manager
