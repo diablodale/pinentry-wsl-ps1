@@ -31,6 +31,36 @@
 #    with every usage.
 #    * Disable: edit the script, near the top, set NOTIFY to the value "0"
 #    * Enable: edit the script, near the top, set NOTIFY to the value "1"
+
+if [[ -z $WSL_INTEROP && -n $INVOCATION_ID ]]; then
+    # workaround when called from gpg-agent running in systemd
+    export WSL_INTEROP=
+    for socket in /run/WSL/*; do
+        if ss -elx | grep -q "$socket"; then
+            export WSL_INTEROP=$socket
+        fi
+    done
+    unset socket
+    if [[ -z $WSL_INTEROP ]]; then
+        printf "No working WSL_INTEROP socket found" >&2
+        return 1
+    fi
+    if ! type powershell.exe >/dev/null 2>&1; then
+        # Add windows PATH to $PATH
+        # get windows path | remove trailing newline | convert to linux paths |
+        # remove trailing '/' in some paths | replace newlines with ':'
+        # remove trailing ':' that was a '\n' before
+        PATH=$PATH:$(
+            wslvar PATH | \
+            tr -d $'\n' | \
+            xargs -d$';' -n1 wslpath | \
+            sed 's#/\?$##g' | \
+            tr $'\n' ':' | \
+            sed 's/:$//'
+        )
+    fi
+fi
+
 PERSISTENCE=""
 NOTIFY="1"
 DEBUGLOG=""
