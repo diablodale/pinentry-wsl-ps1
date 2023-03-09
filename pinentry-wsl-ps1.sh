@@ -53,6 +53,12 @@ REPEATPASSWORD="0"
 REPEATDESCRIPTION="Confirm password for GPG key"
 REPEATERROR="Error: Passwords did not match."
 GRABKEYBOARD="0"
+PSEXE="powershell.exe"
+
+# run powershell command
+runps() {
+    "$PSEXE" -nologo -noprofile -noninteractive -command "$1"
+}
 
 # convert Assuan protocol error into an ERR number, e.g. echo -n $(( (5 << 24) | $1 ))
 assuan_result() {
@@ -152,11 +158,11 @@ DLM
         if [ "$REPEATPASSWORD" == "0" ]; then
             if [ "$EXTPASSCACHE" == "1" ]; then
                 if [ -n "$KEYINFO" ]; then
-                    credpassword="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_lookup")"
+                    credpassword="$(runps "$cmd_lookup")"
                     if [ -n "$credpassword" ]; then
                         echo -e "S PASSWORD_FROM_CACHE\nD $credpassword\nOK"
                         if [ "$NOTIFY" == "1" ]; then
-                            powershell.exe -nologo -noprofile -noninteractive -command "$cmd_toast" > /dev/null
+                            runps "$cmd_toast" > /dev/null
                         fi
                         return
                     fi
@@ -165,10 +171,10 @@ DLM
         fi
     fi
     PINERROR=""
-    credpassword="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_prompt")"
+    credpassword="$(runps "$cmd_prompt")"
     if [ -n "$credpassword" ]; then
         if [ "$REPEATPASSWORD" == "1" ]; then
-            credpasswordrepeat="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_repeat")"
+            credpasswordrepeat="$(runps "$cmd_repeat")"
             if [ "$credpassword" == "$credpasswordrepeat" ]; then
                 echo -e "S PIN_REPEATED\nD $credpassword\nOK"
             else
@@ -183,7 +189,7 @@ DLM
             if [ -n "$KEYINFO" ]; then
                 # avoid setting password on visible param
                 # alt is to always save on the single or last-of-repeat dialog. And if the repeat fails, then immediately delete it from the cred store
-                builtin echo -n "$credpassword" | powershell.exe -nologo -noprofile -noninteractive -command "$cmd_store"
+                builtin echo -n "$credpassword" | "$PSEXE" -nologo -noprofile -noninteractive -command "$cmd_store"
             fi
         fi
     else
@@ -209,7 +215,7 @@ removepassword() {
 DLM
     )
     if [ "$EXTPASSCACHE" == "1" ]; then
-        echo "$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_remove")"
+        echo "$(runps "$cmd_remove")"
     else
         echo "OK"
     fi
@@ -230,7 +236,7 @@ message() {
         [System.Runtime.Interopservices.Marshal]::ReleaseComObject(\$wshShell) | Out-Null
 DLM
     )
-    local result="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd")" #> /dev/null
+    local result="$(runps "$cmd")" #> /dev/null
     echo "OK"
 }
 
@@ -258,7 +264,7 @@ confirm() {
         }
 DLM
     )
-    local result="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd")"
+    local result="$(runps "$cmd")"
     echo "$result"
 }
 
@@ -282,13 +288,25 @@ decodegpgagentstr() {
 # also parses for key ids to display in GUI prompts
 setdescription() {
     DESCRIPTION="$(decodegpgagentstr "$1")"
-    local searchfor='ID ([[:xdigit:]]{16})'  # hack to search for first gpg key id in description
-    if [[ "$1" =~ $searchfor ]]; then
+
+    # gpg key id in description
+    local searchGPG='ID ([[:xdigit:]]{16})'
+
+    # ssh fingerprint in description with legacy formatting
+    # "Please enter the passphrase for the ssh key%0A  11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff%0A  (id2_rsa)"
+    # NOTE newer versions of gpg-agent include "MD5:" before the hash. It caused SSH "user names" to start with "D5"
+    # and not have the last pair. This is cosmetic. Immediately below is the original search pattern.
+    #local searchSSH='((([[:xdigit:]][[:xdigit:]]:){15}[[:xdigit:]][[:xdigit:]]))'
+
+    # new ssh fingerprint in description with potential hash type prefix
+    # "Please enter the passphrase for the ssh key%0A  MD5:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff%0A  (id2_rsa)"
+    local searchSSH='([[:alnum:]]{3,}:)?(([[:xdigit:]][[:xdigit:]]:){15}[[:xdigit:]][[:xdigit:]])'
+
+    # search with regular expressions
+    if [[ "$1" =~ $searchGPG ]]; then
         CACHEUSER="${BASH_REMATCH[1]}"
-    fi
-    local searchfor='(([[:xdigit:]][[:xdigit:]]:){15}[[:xdigit:]][[:xdigit:]])'  # hack to search for ssh fingerprint in description
-    if [[ "$1" =~ $searchfor ]]; then
-        CACHEUSER="${BASH_REMATCH[1]}"
+    elif [[ "$1" =~ $searchSSH ]]; then
+        CACHEUSER="${BASH_REMATCH[2]}"
     fi
     echo "OK"
 }
@@ -394,6 +412,32 @@ setoption() {
 if ! cat /proc/sys/kernel/osrelease | grep -q -i Microsoft; then
     echo "$(assuan_result 257)"
     exit 1
+fi
+
+# set wsl interop socket
+if [[ -z $WSL_INTEROP ]]; then
+    for i in $(pstree -np -s -T -u | grep -E "Relay.+$USER" | grep -o -E '[0-9]+'); do
+        if [[ -e "/run/WSL/${i}_interop" ]]; then
+            export WSL_INTEROP="/run/WSL/${i}_interop"
+        fi
+    done
+    unset i
+    if [[ -z $WSL_INTEROP ]]; then
+        echo "$(assuan_result 257)"
+        exit 1
+    fi
+fi
+
+# locate powershell
+if [[ "$(type -t $PSEXE)" != "file" ]]; then
+    WHERE_LOC="$(wslvar SystemRoot)\\System32\\where.exe"
+    WHERE_LOC="$(wslpath -au "${WHERE_LOC}")"
+    PSEXE="$($WHERE_LOC $PSEXE | tr -d '\n\r')"
+    PSEXE="$(wslpath -au "${PSEXE}")"
+    if [[ -z $PSEXE ]]; then
+        echo "$(assuan_result 257)"
+        exit 1
+    fi
 fi
 
 # main loop to read stdin and respond
