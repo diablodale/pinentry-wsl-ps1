@@ -415,8 +415,16 @@ if ! cat /proc/sys/kernel/osrelease | grep -q -i Microsoft; then
 fi
 
 # set wsl interop socket
+# TODO integrate future fix for bug https://github.com/microsoft/WSL/issues/5065
 if [[ -z $WSL_INTEROP ]]; then
-    for i in $(pstree -np -s -T -u | grep -E "Relay.+$USER" | grep -o -E '[0-9]+'); do
+    SOCKET_LIST="$(pstree -np -s -T -u | grep -E "Relay.+$USER" | grep -o -E '[0-9]+')"
+    if [[ -z "$SOCKET_LIST" ]]; then
+        SOCKET_LIST="$(pstree -np -s -T -u | grep -E "$USER" | grep -o -E '[0-9]+')"
+    fi
+    if [[ -z "$SOCKET_LIST" ]]; then
+        SOCKET_LIST="$(ls -tr /run/WSL | grep -o -E '[0-9]+')"
+    fi
+    for i in $SOCKET_LIST; do
         if [[ -e "/run/WSL/${i}_interop" ]]; then
             export WSL_INTEROP="/run/WSL/${i}_interop"
         fi
