@@ -34,6 +34,12 @@
 PERSISTENCE=""
 NOTIFY="1"
 DEBUGLOG=""
+POWERSHELL="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+
+# run a powershell command; strip Windows CR so output is clean for Assuan
+runps() {
+    "$POWERSHELL" -nologo -noprofile -noninteractive -command "$1" | tr -d '\r'
+}
 
 # Do not casually edit the below values
 VERSION="0.2.1"
@@ -84,6 +90,83 @@ assuan_result() {
     esac
 }
 
+# WinForms password dialog; $1 = description text
+# ($Host.ui.PromptForCredential fails with "Access is denied" when powershell
+#  has no console window, e.g. when gpg-agent runs under systemd)
+passworddialog() {
+    cat <<-DLM
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+        [System.Windows.Forms.Application]::EnableVisualStyles()
+        \$form = New-Object System.Windows.Forms.Form
+        \$form.Text = "$TITLE"
+        \$form.FormBorderStyle = "FixedDialog"
+        \$form.StartPosition = "CenterScreen"
+        \$form.MinimizeBox = \$false
+        \$form.MaximizeBox = \$false
+        \$form.TopMost = \$true
+        \$desc = New-Object System.Windows.Forms.Label
+        \$desc.Text = "$1"
+        \$desc.AutoSize = \$true
+        \$desc.MaximumSize = New-Object System.Drawing.Size(400, 0)
+        \$desc.Location = New-Object System.Drawing.Point(12, 12)
+        \$form.Controls.Add(\$desc)
+        \$y = 24 + \$desc.GetPreferredSize((New-Object System.Drawing.Size(400, 0))).Height
+        \$prompt = New-Object System.Windows.Forms.Label
+        \$prompt.Text = "$PROMPT"
+        \$prompt.AutoSize = \$true
+        \$prompt.Location = New-Object System.Drawing.Point(12, (\$y + 3))
+        \$form.Controls.Add(\$prompt)
+        \$pw = New-Object System.Windows.Forms.TextBox
+        \$pw.UseSystemPasswordChar = \$true
+        \$pw.Location = New-Object System.Drawing.Point(100, \$y)
+        \$pw.Width = 312
+        \$form.Controls.Add(\$pw)
+        # editing shortcuts; Ctrl+Backspace/Delete remove everything before/after the
+        # caret rather than one word, so they don't reveal word boundaries
+        \$pw.Add_KeyDown({
+            param(\$sender, \$e)
+            if (-not \$e.Control) { return }
+            \$start = \$pw.SelectionStart
+            switch (\$e.KeyCode) {
+                "A" { \$pw.SelectAll() }
+                "U" { \$pw.Clear() }
+                "Back" {
+                    if (\$pw.SelectionLength -gt 0) { \$pw.SelectedText = "" }
+                    else { \$pw.Text = \$pw.Text.Substring(\$start); \$pw.SelectionStart = 0 }
+                }
+                "Delete" {
+                    if (\$pw.SelectionLength -gt 0) { \$pw.SelectedText = "" }
+                    else { \$pw.Text = \$pw.Text.Substring(0, \$start); \$pw.SelectionStart = \$start }
+                }
+                default { return }
+            }
+            \$e.SuppressKeyPress = \$true
+        })
+        \$ok = New-Object System.Windows.Forms.Button
+        \$ok.Text = "$OKBUTTON"
+        \$ok.DialogResult = "OK"
+        \$ok.Location = New-Object System.Drawing.Point(256, (\$y + 36))
+        \$form.Controls.Add(\$ok)
+        \$cancel = New-Object System.Windows.Forms.Button
+        \$cancel.Text = "$CANCELBUTTON"
+        \$cancel.DialogResult = "Cancel"
+        \$cancel.Location = New-Object System.Drawing.Point(337, (\$y + 36))
+        \$form.Controls.Add(\$cancel)
+        \$form.AcceptButton = \$ok
+        \$form.CancelButton = \$cancel
+        \$form.ClientSize = New-Object System.Drawing.Size(424, (\$y + 72))
+        \$form.Add_Shown({ \$form.Activate(); \$pw.Focus() })
+        if (\$form.ShowDialog() -eq "OK" -and \$pw.Text) {
+            # write raw UTF-8 bytes so non-ASCII passwords survive the console codepage
+            \$bytes = [System.Text.Encoding]::UTF8.GetBytes(\$pw.Text)
+            \$out = [Console]::OpenStandardOutput()
+            \$out.Write(\$bytes, 0, \$bytes.Length)
+            \$out.Flush()
+        }
+DLM
+}
+
 # GUI dialogs for passwords; text is dynamically set by gpg-agent via protocol
 getpassword() {
     if [ -n "$CACHEUSER" ]; then
@@ -95,30 +178,8 @@ getpassword() {
             local creduser="--not yet defined--"
         fi
     fi
-    local cmd_prompt=$(cat <<-DLM
-        \$cred = \$Host.ui.PromptForCredential("$TITLE",
-            "$PINERROR$DESCRIPTION",
-            "$creduser",
-            "",
-            "Generic",
-            "None,ReadOnlyUserName")
-        if (\$cred) {
-            Write-Output \$cred.GetNetworkCredential().Password
-        }
-DLM
-    )
-    local cmd_repeat=$(cat <<-DLM
-        \$cred = \$Host.ui.PromptForCredential("$TITLE",
-            "$REPEATDESCRIPTION",
-            "$creduser",
-            "",
-            "Generic",
-            "None,ReadOnlyUserName")
-        if (\$cred) {
-            Write-Output \$cred.GetNetworkCredential().Password
-        }
-DLM
-    )
+    local cmd_prompt="$(passworddialog "$PINERROR$DESCRIPTION")"
+    local cmd_repeat="$(passworddialog "$REPEATDESCRIPTION")"
     local cmd_lookup=$(cat <<-DLM
         \$cred = Get-StoredCredential -Target "$CACHEPREFIX$KEYINFO" -Type GENERIC
         if (\$cred) {
@@ -152,11 +213,11 @@ DLM
         if [ "$REPEATPASSWORD" == "0" ]; then
             if [ "$EXTPASSCACHE" == "1" ]; then
                 if [ -n "$KEYINFO" ]; then
-                    credpassword="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_lookup")"
+                    credpassword="$(runps "$cmd_lookup")"
                     if [ -n "$credpassword" ]; then
-                        echo -e "S PASSWORD_FROM_CACHE\nD $credpassword\nOK"
+                        printf 'S PASSWORD_FROM_CACHE\nD %s\nOK\n' "${credpassword//%/%25}"
                         if [ "$NOTIFY" == "1" ]; then
-                            powershell.exe -nologo -noprofile -noninteractive -command "$cmd_toast" > /dev/null
+                            runps "$cmd_toast" > /dev/null
                         fi
                         return
                     fi
@@ -165,25 +226,25 @@ DLM
         fi
     fi
     PINERROR=""
-    credpassword="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_prompt")"
+    credpassword="$(runps "$cmd_prompt")"
     if [ -n "$credpassword" ]; then
         if [ "$REPEATPASSWORD" == "1" ]; then
-            credpasswordrepeat="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_repeat")"
+            credpasswordrepeat="$(runps "$cmd_repeat")"
             if [ "$credpassword" == "$credpasswordrepeat" ]; then
-                echo -e "S PIN_REPEATED\nD $credpassword\nOK"
+                printf 'S PIN_REPEATED\nD %s\nOK\n' "${credpassword//%/%25}"
             else
                 message "$REPEATERROR" > /dev/null
                 echo "$(assuan_result 114)" # unsure this is the correct error
                 return
             fi
         else
-            echo -e "D $credpassword\nOK"
+            printf 'D %s\nOK\n' "${credpassword//%/%25}"
         fi
         if [ "$EXTPASSCACHE" == "1" ]; then
             if [ -n "$KEYINFO" ]; then
                 # avoid setting password on visible param
                 # alt is to always save on the single or last-of-repeat dialog. And if the repeat fails, then immediately delete it from the cred store
-                builtin echo -n "$credpassword" | powershell.exe -nologo -noprofile -noninteractive -command "$cmd_store"
+                printf '%s' "$credpassword" | runps "$cmd_store"
             fi
         fi
     else
@@ -209,7 +270,7 @@ removepassword() {
 DLM
     )
     if [ "$EXTPASSCACHE" == "1" ]; then
-        echo "$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd_remove")"
+        echo "$(runps "$cmd_remove")"
     else
         echo "OK"
     fi
@@ -230,7 +291,7 @@ message() {
         [System.Runtime.Interopservices.Marshal]::ReleaseComObject(\$wshShell) | Out-Null
 DLM
     )
-    local result="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd")" #> /dev/null
+    local result="$(runps "$cmd")" #> /dev/null
     echo "OK"
 }
 
@@ -258,7 +319,7 @@ confirm() {
         }
 DLM
     )
-    local result="$(powershell.exe -nologo -noprofile -noninteractive -command "$cmd")"
+    local result="$(runps "$cmd")"
     echo "$result"
 }
 
@@ -329,17 +390,17 @@ setrepeaterror () {
 }
 
 setokbutton() {
-    OKBUTTON="${1//_/&}"
+    OKBUTTON="${1//_/\&}"
     echo "OK"
 }
 
 setcancelbutton() {
-    CANCELBUTTON="${1//_/&}"
+    CANCELBUTTON="${1//_/\&}"
     echo "OK"
 }
 
 setnotokbutton() {
-    NOTOKBUTTON="${1//_/&}"
+    NOTOKBUTTON="${1//_/\&}"
     echo "OK"
 }
 
